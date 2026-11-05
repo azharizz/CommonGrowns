@@ -173,6 +173,17 @@ class SelfServeGroupTests(GroupBase):
         with self.assertRaises(ValueError):          # group already linked
             self.say("/setup Other Co")
 
+    def test_open_demo_groups_let_any_member_act_and_cap_heavy_requests(self):
+        self.say("/setup Acme Corp")
+        with self.assertRaises(ValueError):
+            self.say("/status", sender="tg-guest")
+        self.config.update(open_companies=["Acme Corp"], daily_limit=2)
+        self.assertEqual(self.say("/status", sender="tg-guest")["company"], "Acme Corp")
+        for _ in range(2):
+            with self.assertRaises(ValueError):       # too little known yet, but it still counts as heavy work
+                self.say("/fromchat")
+        self.assertIn("daily limit", self.say("/fromchat", sender="tg-guest")["reply"])
+
     def test_cannot_take_existing_or_static_companies(self):
         for name in ("CloudKita", "cloudkita", "NusaConf"):
             with self.assertRaises(ValueError):

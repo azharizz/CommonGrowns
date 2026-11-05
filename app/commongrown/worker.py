@@ -30,7 +30,7 @@ def authorize(config, state, sender, room):
     group = state.group(room) if isinstance(room, str) and room not in config["rooms"] else None
     if group:
         # Self-serve company group: only the sender who linked it may act for the company.
-        if sender != group["owner"]:
+        if sender != group["owner"] and group["company"] not in config.get("open_companies", []):
             raise ValueError("Only the group owner who ran /setup can use company commands")
         return Scope(sender, group["company"], group["owner"], room, "private")
     if not isinstance(sender, str) or sender not in config["users"] or room not in config["rooms"]:
@@ -148,6 +148,7 @@ class Worker:
         self.state, self.exchange, self.llm = state, exchange, llm
         self.config, self.root = config, Path(root)
         self.history = ConversationStore(root)
+        self.slow_log = {}
 
     def is_self(self, payload):
         name = self.config.get("name", "commongrown").lower()
@@ -192,7 +193,9 @@ class Worker:
         norm = said.lower().strip(" .!?")
         if group:
             watch = self.state.watch(room)
-            if watch["stage"] != "idle" and sender == group["owner"] and norm in YES | NO:
+            if self.is_slow(event) and self.over_cap(room):
+                return {"reply": "This group has used its daily limit of model-heavy requests. Try again tomorrow."}
+            if watch["stage"] != "idle" and self.may_act(group, sender) and norm in YES | NO:
                 return self.answer(group, watch, norm in YES, payload.get("message_id"))
             if group["mode"] == "listen" and norm not in YES | NO:
                 self.state.add_evidence(room, payload.get("message_id"), sender, said)
@@ -245,6 +248,19 @@ class Worker:
                          "Want me to find matching companies? The group owner can reply “yes” to see a draft first "
                          "(nothing is published until a second yes), or “no” to skip."}
 
+    def may_act(self, group, sender):
+        return sender == group["owner"] or group["company"] in self.config.get("open_companies", [])
+
+    def over_cap(self, room):
+        """Daily cap on slow (model-heavy) requests per group. ponytail: in-memory, resets on restart."""
+        now, limit = time.time(), self.config.get("daily_limit", 25)
+        log = self.slow_log.setdefault(room, [])
+        log[:] = [t for t in log if now - t < 86400]
+        if len(log) >= limit:
+            return True
+        log.append(now)
+        return False
+
     def is_slow(self, event):
         """True when handling this message will take a while (model work), so the chat gets an acknowledgement first."""
         payload = event.get("payload", {})
@@ -253,7 +269,7 @@ class Worker:
             return True
         room = event.get("room_id")
         group = self.state.group(room) if isinstance(room, str) and room not in self.config["rooms"] else None
-        return bool(group and payload.get("sender") == group["owner"]
+        return bool(group and self.may_act(group, payload.get("sender"))
                     and body.lower().strip(" .!?") in YES and self.state.watch(room)["stage"] != "idle")
 
     def answer(self, group, watch, yes, message_id):
