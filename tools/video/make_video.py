@@ -62,8 +62,12 @@ def one(scene):
 with ThreadPoolExecutor(3) as pool:
     list(pool.map(one, SCENES))
 
-names = ["00_intro.mp4"] + [f"{k}.mp4" for k, *_ in SCENES] + ["99_outro.mp4"]
-lst = os.path.join(rec, "clips", "all.txt")
-open(lst, "w").write("".join(f"file '{os.path.join(rec, 'clips', n)}'\n" for n in names))
-subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", "-movflags", "+faststart", out], check=True)
-print("FINAL", out)
+def join(names, target):
+    lst = os.path.join(rec, "clips", "list_" + os.path.basename(target) + ".txt")
+    open(lst, "w").write("".join(f"file '{os.path.join(rec, 'clips', n)}'\n" for n in names))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                    "-movflags", "+faststart", target], check=True)
+    print("FINAL", target)
+
+join(["00_intro.mp4"] + [f"{k}.mp4" for k, *_ in SCENES] + ["99_outro.mp4"], out)
+join(["00_intro.mp4", "s1.mp4", "s2.mp4", "s6.mp4", "99_outro.mp4"], out.replace(".mp4", "_short.mp4"))

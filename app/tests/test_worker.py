@@ -192,6 +192,7 @@ class SelfServeGroupTests(GroupBase):
 
     def test_bots_own_messages_are_not_buffered(self):
         self.say("/setup Acme Corp")
+        self.say("Linked this group", sender="@someone:x", addressed=False, name="CommonGrown")   # display name
         self.say("Linked this group", sender="@commongrown:x", addressed=False, name="commongrown")
         self.assertEqual(self.state.buffer("group-1"), [])
 

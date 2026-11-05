@@ -54,7 +54,13 @@ def timeline(frames):
     for n, (p, a, b) in enumerate(kept):
         end = kept[n + 1][1] if n + 1 < len(kept) else b + 1.5
         span = end - a
-        out.append((p, span if span <= 8 else 3 + min(4, (span - 3) / 10)))
+        if span <= 3:
+            seconds = span * 0.6                    # conversation pacing between chat messages
+        elif span <= 7:
+            seconds = span                          # reading time on a reply
+        else:
+            seconds = 4 + min(3, (span - 7) / 12)   # model-processing waits
+        out.append((p, seconds))
     return out
 
 def main(frames_dir, out, title, bullets, step):
@@ -68,7 +74,7 @@ def main(frames_dir, out, title, bullets, step):
         f.write(f"file '{plan[-1][0]}'\n")
     total = sum(s for _, s in plan)
     x, y, w, h = CROP
-    vf = "[1:v]scale=-2:1000[c];[0:v][c]overlay=1090:40,fps=30,format=yuv420p"
+    vf = "[1:v]crop=in_w:in_h-72:0:72,scale=-2:1000[c];[0:v][c]overlay=1090:40,fps=30,format=yuv420p"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", "30", "-t", f"{total:.2f}", "-i", bg, "-f", "concat", "-safe", "0", "-i", lst,
                     "-filter_complex", vf, "-t", f"{total:.2f}", "-c:v", "libx264", "-crf", "20", "-preset", "medium", out], check=True)
     print(f"{os.path.basename(out)}: {len(frames)} frames, {total:.0f}s after compressing waits")

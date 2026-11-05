@@ -151,8 +151,9 @@ class Worker:
 
     def is_self(self, payload):
         name = self.config.get("name", "commongrown").lower()
-        return (str(payload.get("sender_name", "")).lower() == name
-                or str(payload.get("sender", "")).lower().startswith("@" + name + ":"))
+        names = {name, "commongrown"}  # the agent may carry a friendlier display name than its handle
+        return (str(payload.get("sender_name", "")).lower() in names
+                or any(str(payload.get("sender", "")).lower().startswith("@" + n + ":") for n in names))
 
     def mention(self, message):
         mention = "@" + self.config.get("name", "commongrown")
