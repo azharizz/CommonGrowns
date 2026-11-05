@@ -18,8 +18,15 @@ ACCOUNTS = [
 
 
 STARTER_CREDITS = 3
-EVIDENCE_TTL = 7 * 24 * 3600
-EVIDENCE_PER_ROOM = 200
+BUFFER_TTL = 24 * 3600      # raw messages are only input for the next summary, never an archive
+BUFFER_PER_ROOM = 40
+FACT_KINDS = ("need", "offer", "constraint", "fact")
+MAX_FACTS = 60
+
+
+def label(value):
+    """Only anonymous labels are ever stored or shown as a fact's source."""
+    return value if isinstance(value, str) and re.fullmatch(r"owner|member \d{1,3}", value) else "team"
 
 
 class State:
@@ -54,6 +61,15 @@ class State:
                 CREATE TABLE IF NOT EXISTS evidence (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, message_id TEXT NOT NULL,
                     sender TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL, UNIQUE(room_id, message_id));
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, key TEXT NOT NULL,
+                    kind TEXT NOT NULL, value TEXT NOT NULL, public INTEGER NOT NULL,
+                    source TEXT NOT NULL, snippet TEXT NOT NULL, updated REAL NOT NULL, UNIQUE(company, key));
+                CREATE TABLE IF NOT EXISTS conflicts (
+                    company TEXT NOT NULL, key TEXT NOT NULL, note TEXT NOT NULL, created REAL NOT NULL,
+                    PRIMARY KEY(company, key));
+                CREATE TABLE IF NOT EXISTS members (
+                    room_id TEXT NOT NULL, sender TEXT NOT NULL, label TEXT NOT NULL, PRIMARY KEY(room_id, sender));
                 CREATE TABLE IF NOT EXISTS watch (
                     room_id TEXT PRIMARY KEY, stage TEXT NOT NULL DEFAULT 'idle',
                     digest TEXT, marker INTEGER NOT NULL DEFAULT 0, checked REAL NOT NULL DEFAULT 0);
@@ -129,27 +145,74 @@ class State:
         with self.connect() as db:
             db.execute("UPDATE groups SET mode=? WHERE room_id=?", (mode, room_id))
 
+    def member_label(self, room_id, sender, db):
+        """Stable, anonymous per-group label: 'owner' or 'member N'. Real chat IDs are never shown to the model."""
+        row = db.execute("SELECT label FROM members WHERE room_id=? AND sender=?", (room_id, sender)).fetchone()
+        if row:
+            return row["label"]
+        group = db.execute("SELECT owner FROM groups WHERE room_id=?", (room_id,)).fetchone()
+        if group and group["owner"] == sender:
+            label = "owner"
+        else:
+            label = "member %d" % (db.execute("SELECT COUNT(*) FROM members WHERE room_id=? AND label!='owner'", (room_id,)).fetchone()[0] + 1)
+        db.execute("INSERT INTO members VALUES (?, ?, ?)", (room_id, sender, label))
+        return label
+
     def add_evidence(self, room_id, message_id, sender, body):
+        """Buffer one message as input for the next summary. Not an archive: cleared once summarized."""
         body = body.strip()[:2000] if isinstance(body, str) else ""
         if not body or body.startswith("/") or not isinstance(message_id, str) or not isinstance(sender, str):
             return False
         now = time.time()
         with self.connect() as db:
+            label = self.member_label(room_id, sender, db)
             db.execute("INSERT OR IGNORE INTO evidence(room_id, message_id, sender, body, created) VALUES (?,?,?,?,?)",
-                       (room_id, message_id[:300], sender[:300], body, now))
-            db.execute("DELETE FROM evidence WHERE created < ?", (now - EVIDENCE_TTL,))
+                       (room_id, message_id[:300], label, body, now))
+            db.execute("DELETE FROM evidence WHERE created < ?", (now - BUFFER_TTL,))
             db.execute("""DELETE FROM evidence WHERE room_id=? AND id NOT IN
                 (SELECT id FROM evidence WHERE room_id=? ORDER BY id DESC LIMIT ?)""",
-                       (room_id, room_id, EVIDENCE_PER_ROOM))
+                       (room_id, room_id, BUFFER_PER_ROOM))
         return True
 
-    def evidence(self, room_id, limit=40):
+    def buffer(self, room_id):
         with self.connect() as db:
-            rows = db.execute("SELECT sender, body FROM (SELECT id, sender, body FROM evidence WHERE room_id=? "
-                              "ORDER BY id DESC LIMIT ?) ORDER BY id", (room_id, limit)).fetchall()
-        labels = {}
-        return [{"member": labels.setdefault(r["sender"], f"member{len(labels) + 1}"), "body": r["body"][:500]}
-                for r in rows]
+            rows = db.execute("SELECT id, sender, body FROM evidence WHERE room_id=? ORDER BY id", (room_id,)).fetchall()
+        return [{"id": r["id"], "member": r["sender"], "body": r["body"][:500]} for r in rows]
+
+    def clear_buffer(self, room_id, upto):
+        with self.connect() as db:
+            db.execute("DELETE FROM evidence WHERE room_id=? AND id<=?", (room_id, upto))
+
+    def facts(self, company, public_only=False):
+        with self.connect() as db:
+            rows = db.execute("SELECT key, kind, value, public, source, snippet FROM facts WHERE company=?"
+                              + (" AND public=1" if public_only else "") + " ORDER BY kind, key", (company,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def conflicts(self, company):
+        with self.connect() as db:
+            return [dict(r) for r in db.execute("SELECT key, note FROM conflicts WHERE company=? ORDER BY key", (company,))]
+
+    def apply_facts(self, company, facts, conflicts):
+        """Merge a summary update. Same key = newer value replaces the old one (corrections win)."""
+        now = time.time()
+        with self.connect() as db:
+            for f in facts:
+                if f["kind"] not in FACT_KINDS or not re.fullmatch(r"[a-z0-9_]{2,40}", f["key"]):
+                    continue
+                db.execute("""INSERT INTO facts(company, key, kind, value, public, source, snippet, updated)
+                    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(company, key) DO UPDATE SET kind=excluded.kind,
+                    value=excluded.value, public=excluded.public, source=excluded.source,
+                    snippet=excluded.snippet, updated=excluded.updated""",
+                           (company, f["key"], f["kind"], text(f["value"], "fact", 300).strip(), 1 if f["public"] else 0,
+                            label(f["member"]), str(f["snippet"])[:200], now))
+                db.execute("DELETE FROM conflicts WHERE company=? AND key=?", (company, f["key"]))
+            for c in conflicts:
+                if re.fullmatch(r"[a-z0-9_]{2,40}", c["key"]):
+                    db.execute("INSERT OR REPLACE INTO conflicts VALUES (?,?,?,?)",
+                               (company, c["key"], text(c["note"], "conflict", 300).strip(), now))
+            db.execute("""DELETE FROM facts WHERE company=? AND id NOT IN
+                (SELECT id FROM facts WHERE company=? ORDER BY updated DESC, id DESC LIMIT ?)""", (company, company, MAX_FACTS))
 
     def watch(self, room_id):
         with self.connect() as db:
@@ -170,19 +233,24 @@ class State:
             newest = db.execute("SELECT COALESCE(MAX(id), 0) FROM evidence WHERE room_id=?", (room_id,)).fetchone()[0]
         return count, newest
 
-    def forget(self, room_id):
+    def forget(self, room_id, company):
         with self.connect() as db:
-            return db.execute("DELETE FROM evidence WHERE room_id=?", (room_id,)).rowcount
+            n = db.execute("DELETE FROM facts WHERE company=?", (company,)).rowcount
+            db.execute("DELETE FROM conflicts WHERE company=?", (company,))
+            db.execute("DELETE FROM evidence WHERE room_id=?", (room_id,))
+            db.execute("DELETE FROM members WHERE room_id=?", (room_id,))
+        return n
 
     def status(self, company, room_id=None):
         account = self.account(company)
+        facts = self.facts(company)
         with self.connect() as db:
             opps = [r["opp_id"] for r in db.execute("SELECT opp_id FROM opportunities WHERE company=?", (company,))]
             group = db.execute("SELECT mode FROM groups WHERE company=?", (company,)).fetchone()
-            count = db.execute("SELECT COUNT(*) FROM evidence WHERE room_id=?", (room_id,)).fetchone()[0] if room_id else 0
         return {"company": company, "plan": account["plan"], "credits": account["credits"],
                 "verified_level": account["verified_level"], "mode": group["mode"] if group else None,
-                "evidence_messages": count, "opportunities": opps}
+                "facts_known": len(facts), "facts_private": sum(1 for f in facts if not f["public"]),
+                "open_questions": len(self.conflicts(company)), "opportunities": opps}
 
     def participants(self, left, right):
         self.pair(left, right)

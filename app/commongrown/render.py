@@ -22,7 +22,7 @@ def draft(result):
              f"• Budget: {money(d['budget_min'], d['budget_max'])}", f"• Region: {d['region']}",
              f"• Categories: {', '.join(d['categories'])}", f"• Audience: {d['audience']}"]
     if result.get("evidence"):
-        lines += ["", "Based on what you said:"] + [f"“{q}”" for q in result["evidence"]]
+        lines += ["", "Where this came from:"] + [f"• {q}" for q in result["evidence"]]
     lines += ["", "Nothing is published yet. Reply “yes” to publish and find matches, “no” to cancel, "
               f"or edit with /draft. (Exact command: /approve {result['approval']})"]
     return "\n".join(lines)
@@ -80,8 +80,28 @@ def status(result):
              f"• Verification: {result['verified_level']} (demo)"]
     if result.get("mode"):
         lines.append(f"• Mode: {where[result['mode']]}")
-        lines.append(f"• Messages kept as evidence: {result['evidence_messages']}")
+        lines.append(f"• Facts I know: {result['facts_known']} ({result['facts_private']} kept private)")
+        if result.get("open_questions"):
+            lines.append(f"• Open questions for you: {result['open_questions']} (see /facts)")
     lines.append("• Published opportunities: " + (", ".join(result["opportunities"]) or "none yet"))
+    return "\n".join(lines)
+
+
+def facts_view(result):
+    v = result["facts_view"]
+    names = {"need": "Needs", "offer": "Offers", "constraint": "Constraints", "fact": "Facts"}
+    if not v["facts"] and not v["private_count"] and not v["conflicts"]:
+        return f"I don't know anything about {v['company']} yet. Just talk about what you need in this group."
+    lines = [f"What I know about {v['company']} (shareable):"]
+    for kind, title in names.items():
+        items = [f for f in v["facts"] if f["kind"] == kind]
+        if items:
+            lines += ["", title + ":"] + [f"• {f['value']} ({f['source']})" for f in items]
+    if v["private_count"]:
+        lines += ["", f"{v['private_count']} confidential fact(s) kept private and never shown here or shared."]
+    if v["conflicts"]:
+        lines += ["", "Please settle:"] + [f"• {c['note']}" for c in v["conflicts"]]
+    lines += ["", "Anything wrong? Say so in the chat and I'll correct it, or /forget to wipe it."]
     return "\n".join(lines)
 
 
@@ -98,6 +118,8 @@ def render(result):
         result = {key: value for key, value in result.items() if key not in ("published", "approval")}
     if "publish_exactly" in result:
         return draft(result)
+    if "facts_view" in result:
+        return facts_view(result)
     if "headlines" in result:
         parts.append(headlines(result))
     elif "verdict" in result and "fits" in result or "locked" in result or "compatible" in result:

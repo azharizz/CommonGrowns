@@ -4,12 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from commongrown.worker import Worker, authorize
+from commongrown.worker import EXTRACT_SCHEMA, INTAKE_SCHEMA, Worker, authorize
 from commongrown.state import State
 from test_core import opportunity
 
 
-class WorkerTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -35,6 +35,9 @@ class WorkerTests(unittest.TestCase):
         return {"room_id": room, "payload": {"sender": sender, "message_id": message,
                 "body": body, "addressed": True}}
 
+
+
+class WorkerTests(Fixture):
     def test_identity_comes_from_trusted_sender_not_message_company(self):
         for sender, room in (("user-budi", "private-a"), ("unknown", "private-a"), ("user-rina", "unknown")):
             with self.assertRaises(ValueError):
@@ -121,8 +124,12 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.llm.generate.call_count, 2)
 
 
-class SelfServeGroupTests(WorkerTests):
-    """Add the bot to a group, link a company, listen, draft from chat."""
+def fact(key, value, kind="need", public=True, member="owner", snippet="said so"):
+    return {"key": key, "kind": kind, "value": value, "public": public, "member": member, "snippet": snippet}
+
+
+class GroupBase(Fixture):
+    """A company chat group: the bot is added, /setup links it, people just talk."""
     def say(self, body, sender="tg-owner", room="group-1", message=None, addressed=True, name=None):
         self.n = getattr(self, "n", 0) + 1
         payload = {"sender": sender, "message_id": message or f"g{self.n}", "body": body, "addressed": addressed}
@@ -130,15 +137,36 @@ class SelfServeGroupTests(WorkerTests):
             payload["sender_name"] = name
         return self.worker.handle({"room_id": room, "payload": payload})
 
+    def chat(self, n=3, sender="tg-member"):
+        for i in range(n):
+            self.say(f"we need sponsors for our summit {i}", addressed=False, sender=sender)
+
+    def setUp(self):
+        super().setUp()
+        self.extract = {"facts": [], "conflicts": [], "suggest": False, "summary": ""}
+        self.draft = {"reply": "Drafted.", "draft": dict(self.a.to_dict(), opp_id="X", company="whoever")}
+        self.prompts = []
+        self.llm.generate.side_effect = self.fake
+
+    def fake(self, prompt, schema):
+        self.prompts.append(prompt)
+        if schema is EXTRACT_SCHEMA:
+            return self.extract
+        if schema is INTAKE_SCHEMA:
+            return self.draft
+        raise AssertionError("unexpected schema")
+
+
+class SelfServeGroupTests(GroupBase):
     def test_unlinked_group_gets_onboarding_and_ignores_chatter(self):
         self.assertIsNone(self.say("hello", addressed=False))
         self.assertIn("/setup", self.say("hi bot")["reply"])
         self.llm.generate.assert_not_called()
 
-    def test_setup_creates_company_with_starter_credits_and_owner(self):
-        result = self.say("/setup Acme Corp")
-        self.assertIn("Acme Corp", result["reply"])
-        self.assertEqual(self.say("/status")["credits"], 3)
+    def test_setup_creates_company_with_starter_credits_owner_and_listens(self):
+        self.assertIn("Acme Corp", self.say("/setup Acme Corp")["reply"])
+        status = self.say("/status")
+        self.assertEqual((status["credits"], status["mode"]), (3, "listen"))
         self.assertEqual(self.state.group("group-1")["owner"], "tg-owner")
         with self.assertRaises(ValueError):          # not the owner
             self.say("/status", sender="tg-other")
@@ -155,105 +183,154 @@ class SelfServeGroupTests(WorkerTests):
         self.assertIn("NusaConf", self.say("/setup NusaConf", sender="user-rina", room="g-z")["reply"])
         self.assertIn("SecureNusa", self.say("/setup securenusa", room="g-y")["reply"])
 
-    def test_mention_mode_stores_nothing_and_listen_mode_gathers_evidence(self):
-        self.say("/setup Acme Corp")                      # listening by default, after a visible notice
+    def test_mention_mode_reads_nothing(self):
+        self.say("/setup Acme Corp")
         self.say("/mode mention")
-        self.say("we need sponsors", addressed=False)
-        self.assertEqual(self.say("/status")["evidence_messages"], 0)
-        self.assertIn("Listen mode ON", self.say("/mode listen")["reply"])
-        self.say("we need sponsors for our conference", addressed=False)
-        self.say("/hidden command text", addressed=False)
-        self.assertEqual(self.say("/status")["evidence_messages"], 1)
-        self.assertIn("Deleted 1", self.say("/forget")["reply"])
-        self.assertEqual(self.say("/status")["evidence_messages"], 0)
+        self.chat(5)
+        self.assertEqual(self.state.buffer("group-1"), [])
+        self.llm.generate.assert_not_called()
 
-    def test_bots_own_messages_are_not_evidence(self):
+    def test_bots_own_messages_are_not_buffered(self):
         self.say("/setup Acme Corp")
-        self.say("/mode listen")
         self.say("Linked this group", sender="@commongrown:x", addressed=False, name="commongrown")
-        self.assertEqual(self.say("/status")["evidence_messages"], 0)
+        self.assertEqual(self.state.buffer("group-1"), [])
 
-    def test_fromchat_stages_draft_with_forced_identity_and_verified_quotes(self):
-        self.say("/setup Acme Corp")
-        self.say("/mode listen")
-        self.say("We run a 500 person dev conference in Jakarta and need a sponsor", addressed=False)
-        draft = dict(self.a.to_dict(), opp_id="A1", company="NusaConf")
-        self.llm.generate.return_value = {"reply": "Found it.", "draft": draft,
-                                          "evidence": ["need a sponsor", "invented quote"]}
-        result = self.say("/fromchat")
-        self.assertEqual(result["publish_exactly"]["company"], "Acme Corp")
-        self.assertNotEqual(result["publish_exactly"]["opp_id"], "A1")
-        self.assertEqual(result["evidence"], ["need a sponsor"])
-        self.exchange.upsert.assert_not_called()
-        self.say("/approve " + result["approval"])
-        self.exchange.upsert.assert_called_once()
-        self.assertEqual(self.say("/status")["opportunities"], [result["publish_exactly"]["opp_id"]])
-
-    def test_fromchat_without_evidence_is_rejected(self):
+    def test_fromchat_without_any_facts_is_rejected(self):
         self.say("/setup Acme Corp")
         with self.assertRaises(ValueError):
             self.say("/fromchat")
 
 
-class ProactiveTests(WorkerTests):
-    """People just talk; the bot notices a need, asks, and only the owner's 'yes' moves things forward."""
-    def say(self, body, sender="tg-owner", room="group-1", message=None, addressed=True, name=None):
-        self.n = getattr(self, "n", 0) + 1
-        payload = {"sender": sender, "message_id": message or f"g{self.n}", "body": body, "addressed": addressed}
-        if name:
-            payload["sender_name"] = name
-        return self.worker.handle({"room_id": room, "payload": payload})
-
+class KnowledgeTests(GroupBase):
+    """The company's requirements and facts are what we keep; the chat is not."""
     def setUp(self):
         super().setUp()
         self.say("/setup Acme Corp")
-        self.llm.generate.reset_mock()
-        self.draft = dict(self.a.to_dict(), opp_id="X", company="whoever")
+        self.extract = {"facts": [fact("seeks", "Sponsors for NusaTech Summit"),
+                                  fact("audience", "About 5,000 tech professionals", "fact", member="member 1")],
+                        "conflicts": [], "suggest": False, "summary": ""}
 
-    def chat(self, n=3):
-        for i in range(n):
-            self.say(f"we need sponsors for our summit {i}", addressed=False, sender="tg-member")
+    def test_messages_become_facts_and_the_chat_is_deleted(self):
+        self.chat(3)
+        self.assertEqual([f["key"] for f in self.state.facts("Acme Corp")], ["audience", "seeks"])
+        self.assertEqual(self.state.buffer("group-1"), [])           # nothing but the summary is kept
+        self.assertEqual(self.say("/status")["facts_known"], 2)
 
-    def detect(self, found=True):
-        return {"found": found, "summary": "you're looking for sponsors for NusaTech Summit"}
+    def test_model_sees_stable_member_labels_never_real_chat_ids(self):
+        self.chat(2, sender="tg-member")
+        self.say("we have a booth to offer", addressed=False, sender="tg-owner")
+        prompt = self.prompts[-1]
+        self.assertIn("member 1", prompt)
+        self.assertIn("owner", prompt)
+        self.assertNotIn("tg-member", prompt)
+        self.assertNotIn("tg-owner", prompt)
 
-    def test_setup_listens_by_default_with_a_notice(self):
-        self.assertEqual(self.say("/status")["mode"], "listen")
+    def test_newer_statement_replaces_the_older_value(self):
+        self.chat(3)
+        self.extract = {"facts": [fact("audience", "About 8,000 tech professionals", "fact")], "conflicts": [],
+                        "suggest": False, "summary": ""}
+        self.state.set_watch("group-1", checked=0)
+        self.chat(3)
+        audience = [f for f in self.state.facts("Acme Corp") if f["key"] == "audience"]
+        self.assertEqual([f["value"] for f in audience], ["About 8,000 tech professionals"])
+
+    def test_fact_sources_are_only_anonymous_labels(self):
+        self.extract["facts"] = [fact("seeks", "Sponsors", member="@switch-telegram-ec9:server"),
+                                 fact("audience", "5,000", "fact", member="member 2")]
+        self.chat(3)
+        self.assertEqual({f["key"]: f["source"] for f in self.state.facts("Acme Corp")},
+                         {"seeks": "team", "audience": "member 2"})
+
+    def test_confidential_facts_are_kept_private_everywhere(self):
+        self.extract = {"facts": [fact("seeks", "Sponsors for the summit"), fact("floor", "Our floor is 40k USD", "constraint", public=False),
+                                  fact("region", "Indonesia", "fact"), fact("audience", "5,000 people", "fact"),
+                                  fact("offers", "Booth and keynote", "offer")], "conflicts": [], "suggest": False, "summary": ""}
+        self.chat(3)
+        view = self.say("/facts")
+        self.assertEqual(view["facts_view"]["private_count"], 1)
+        self.assertNotIn("floor", json.dumps(view["facts_view"]["facts"]))
+        from commongrown.render import render
+        self.assertNotIn("40k", render(view))
+        self.assertIn("confidential", render(view))
+        self.say("/fromchat")
+        self.assertNotIn("40k", self.prompts[-1])                      # the drafting model never sees it either
+
+    def test_conflicts_are_flagged_not_guessed_and_clear_when_settled(self):
+        self.extract = {"facts": [], "conflicts": [{"key": "budget_range", "note": "owner says 50k, member 1 says 80k"}],
+                        "suggest": False, "summary": ""}
+        self.chat(3)
+        self.assertEqual(self.say("/status")["open_questions"], 1)
+        from commongrown.render import render
+        self.assertIn("owner says 50k", render(self.say("/facts")))
+        self.extract = {"facts": [fact("budget_range", "50k to 80k USD", "constraint")], "conflicts": [], "suggest": False, "summary": ""}
+        self.state.set_watch("group-1", checked=0)
+        self.chat(3)
+        self.assertEqual(self.say("/status")["open_questions"], 0)
+
+    def test_forget_wipes_facts_and_pending_messages(self):
+        self.chat(3)
+        self.say("one more thing", addressed=False)
+        self.assertIn("Forgot", self.say("/forget")["reply"])
+        self.assertEqual(self.state.facts("Acme Corp"), [])
+        self.assertEqual(self.state.buffer("group-1"), [])
+
+    def test_failed_summary_keeps_messages_for_a_retry(self):
+        self.llm.generate.side_effect = RuntimeError("model down")
+        with self.assertRaises(RuntimeError):
+            self.chat(3)
+        self.assertEqual(len(self.state.buffer("group-1")), 3)
+
+    def test_fromchat_builds_the_draft_from_facts_with_forced_identity(self):
+        self.extract["facts"] = [fact("seeks", "Sponsors"), fact("offers", "Booth", "offer", snippet="we can give a booth")]
+        self.chat(3)
+        staged = self.say("/fromchat")
+        self.assertEqual(staged["publish_exactly"]["company"], "Acme Corp")
+        self.assertNotEqual(staged["publish_exactly"]["opp_id"], "A1")
+        self.assertIn("owner: said so", staged["evidence"])
+        self.exchange.upsert.assert_not_called()
+        self.say("/approve " + staged["approval"])
+        self.exchange.upsert.assert_called_once()
+        self.assertEqual(self.say("/status")["opportunities"], [staged["publish_exactly"]["opp_id"]])
+
+
+class ProactiveTests(GroupBase):
+    """People just talk; the bot notices a need, asks, and only the owner's 'yes' moves things forward."""
+    def setUp(self):
+        super().setUp()
+        self.say("/setup Acme Corp")
+        self.extract = {"facts": [fact("seeks", "Sponsors for NusaTech Summit"), fact("offers", "Booth", "offer")],
+                        "conflicts": [], "suggest": True, "summary": "you're looking for sponsors for NusaTech Summit"}
 
     def test_quiet_until_enough_messages_and_only_asks_once(self):
-        self.llm.generate.return_value = self.detect()
         self.assertIsNone(self.say("we need sponsors", addressed=False))
         self.llm.generate.assert_not_called()
         self.say("we need sponsors 2", addressed=False)
         ask = self.say("we need sponsors 3", addressed=False)
         self.assertIn("looking for sponsors", ask["reply"])
         self.llm.generate.reset_mock()
-        self.chat(6)                                      # already asked: no repeated suggestions
-        self.llm.generate.assert_not_called()
+        self.chat(6)                                                  # already asked: no repeated suggestions
+        self.assertEqual(self.say("/status")["facts_known"], 2)
 
     def test_no_suggestion_when_nothing_concrete(self):
-        self.llm.generate.return_value = self.detect(found=False)
-        self.assertIsNone(self.say("lunch?", addressed=False))
+        self.extract = {"facts": [], "conflicts": [], "suggest": False, "summary": ""}
+        self.say("lunch?", addressed=False)
         self.say("sure", addressed=False)
         self.assertIsNone(self.say("pizza", addressed=False))
 
     def test_only_owner_yes_counts_and_nothing_publishes_without_two_yeses(self):
-        self.llm.generate.return_value = self.detect()
         self.chat(3)
         self.assertIsNone(self.say("yes", sender="tg-member", addressed=False))     # not the owner
-        self.llm.generate.return_value = {"reply": "Found it.", "draft": self.draft, "evidence": ["need sponsors"]}
         staged = self.say("yes", addressed=False)                                   # first yes: draft only
         self.assertIn("publish_exactly", staged)
         self.exchange.upsert.assert_not_called()
         self.exchange.candidates.return_value = []
-        self.exchange.get.side_effect = lambda key: self.a      # the newly published opportunity
+        self.exchange.get.side_effect = lambda key: self.a                          # the newly published opportunity
         done = self.say("yes", addressed=False)                                     # second yes: publish + matches
         self.exchange.upsert.assert_called_once()
         self.assertIn("published", done)
         self.assertEqual(done["headlines"], [])
 
     def test_no_cancels_and_stops_asking_for_a_while(self):
-        self.llm.generate.return_value = self.detect()
         self.chat(3)
         self.assertIn("won't publish", self.say("no", addressed=False)["reply"])
         self.llm.generate.reset_mock()
@@ -261,7 +338,7 @@ class ProactiveTests(WorkerTests):
         self.llm.generate.assert_not_called()
         self.exchange.upsert.assert_not_called()
 
-    def test_member_chatter_never_publishes_and_unaddressed_failures_stay_silent(self):
+    def test_unaddressed_model_failure_never_publishes(self):
         self.llm.generate.side_effect = RuntimeError("model down")
         with self.assertRaises(RuntimeError):             # the transport layer swallows this for unaddressed chatter
             self.chat(3)
@@ -278,7 +355,7 @@ class RenderTests(unittest.TestCase):
             {"headlines": [], "message": "No candidates found"},
             {"published": "A1", "approval": "h", "headlines": [match], "source": "A1"},
             {"company": "Acme", "plan": "free", "credits": 3, "verified_level": "L0", "mode": "listen",
-             "evidence_messages": 2, "opportunities": []},
+             "facts_known": 2, "facts_private": 1, "open_questions": 0, "opportunities": []},
             {"locked": True, "credits": 0, "cost": 1, "message": "x"},
             {"compatible": True, "overlap": "broad"},
             {"mutual": False}, {"approved": True},
@@ -297,6 +374,6 @@ class RenderTests(unittest.TestCase):
                  "budget_max": 100000, "region": "Indonesia", "categories": ["AI"], "audience": "5,000", "status": "open"}
         out = render({"publish_exactly": draft, "approval": "abc", "evidence": ["need sponsors"]})
         self.assertIn("$50,000–$100,000", out)
-        self.assertIn("“need sponsors”", out)
+        self.assertIn("• need sponsors", out)
         self.assertIn("Reply “yes”", out)
         self.assertNotIn('"seeks"', out)
