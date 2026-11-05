@@ -157,3 +157,5 @@ product_research.md
 
 # demo recordings (large)
 assets/video/
+__pycache__/
+*.pyc
