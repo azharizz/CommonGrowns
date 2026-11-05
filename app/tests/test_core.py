@@ -193,8 +193,9 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(calls[0].kwargs["query_texts"], [opportunity().seeks])
         self.assertEqual(calls[1].kwargs["query_texts"], [opportunity().offers])
         query = json.dumps(calls[0].kwargs["where"])
-        for value in ('"offers"', '"open"', '"$lte": 100000', '"$gte": 50000', '"Indonesia"'):
+        for value in ('"offers"', '"open"', '"$lte": 100000', '"$gte": 50000'):
             self.assertIn(value, query)
+        self.assertNotIn('"region"', query)  # region fit is judged by the model, not an exact-match filter
 
     def test_factory_uses_verified_decorator_and_rejects_unknown(self):
         ranker = Mock(return_value=match())

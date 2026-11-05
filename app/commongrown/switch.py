@@ -94,6 +94,12 @@ async def serve(worker, identity, checkpoint):
                 if event:
                     spoken = event["payload"].get("addressed") is True  # never reply to unaddressed chatter
                     try:
+                        if await asyncio.to_thread(worker.is_slow, event):
+                            await asyncio.to_thread(post, f"{base}/agents/{agent}/message", identity["api_key"],
+                                                    {"room_id": event["room_id"], "content": "⏳ Working on it… this can take up to a minute."})
+                    except Exception:
+                        pass  # the acknowledgement is a courtesy; the real work still runs
+                    try:
                         result = await asyncio.to_thread(worker.handle, event)
                     except ValueError as exc:
                         result = {"reply": f"Request rejected: {exc}"} if spoken else None

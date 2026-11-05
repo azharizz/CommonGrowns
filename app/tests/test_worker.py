@@ -345,6 +345,21 @@ class ProactiveTests(GroupBase):
         self.exchange.upsert.assert_not_called()
 
 
+class SlowRequestTests(GroupBase):
+    def ev(self, body, sender="tg-owner", addressed=True):
+        return {"room_id": "group-1", "payload": {"sender": sender, "body": body, "addressed": addressed, "message_id": "m"}}
+
+    def test_slow_requests_get_an_acknowledgement(self):
+        self.say("/setup Acme Corp")
+        self.assertTrue(self.worker.is_slow(self.ev("@commongrown /matches")))
+        self.assertTrue(self.worker.is_slow(self.ev("/fromchat")))
+        self.assertFalse(self.worker.is_slow(self.ev("/status")))
+        self.assertFalse(self.worker.is_slow(self.ev("yes", addressed=False)))          # nothing pending
+        self.state.set_watch("group-1", stage="draft", digest="h")
+        self.assertTrue(self.worker.is_slow(self.ev("yes", addressed=False)))           # owner confirms
+        self.assertFalse(self.worker.is_slow(self.ev("yes", sender="tg-member", addressed=False)))
+
+
 class RenderTests(unittest.TestCase):
     def test_every_reply_shape_is_plain_text_not_json(self):
         from commongrown.render import render

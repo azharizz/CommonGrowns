@@ -43,7 +43,6 @@ class Exchange:
             return []
         constraints = [{"status": "open"}, {"company": {"$ne": source.company}}]
         if strict:
-            constraints.append({"region": source.region})
             if source.budget_min is not None:
                 constraints.append({"$or": [
                     {"budget_known": False},

@@ -100,12 +100,11 @@ def search(exchange, args, llm=None):
     matcher = Matcher(llm or AgentModel())
     if args.counterpart:
         return {"headlines": [headline(matcher.rank(source, exchange.get(args.counterpart)))]}
-    strict = exchange.candidates(source)
-    rows = strict
+    strict = exchange.candidates(source, limit=4)
     strict_ids = {r["opportunity"]["opp_id"] for r in strict}
-    if args.near_misses:
-        rows = strict + [r for r in exchange.candidates(source, strict=False)
-                         if r["opportunity"]["opp_id"] not in strict_ids]
+    rows = strict
+    if args.near_misses and not strict:
+        rows = exchange.candidates(source, strict=False, limit=3)
     def rank_row(row):
         for _ in (1, 2):  # a malformed or mislabeled model answer gets one retry, then the candidate is skipped
             try:
