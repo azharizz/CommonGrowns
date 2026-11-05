@@ -1,0 +1,15 @@
+[project]
+name = "commongrown"
+version = "0.1.0"
+description = "Consent-first B2B opportunity matching and meeting preparation for Switch Rooms"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "chromadb>=1.0,<2",
+    "jsonschema>=4.26.0",
+    "openai-agents>=0.24.0",
+    "python-dotenv>=1.2.4",
+    "websockets>=15,<16",
+]
+
+[tool.uv]
+package = false

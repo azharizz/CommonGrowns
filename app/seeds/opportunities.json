@@ -1,0 +1,44 @@
+[
+  {
+    "opp_id": "A1", "company": "NusaConf",
+    "seeks": "Sponsors for NusaTech Summit in Jakarta, with Cloud, AI and Cybersecurity tracks. Sponsorship range USD 50,000–100,000.",
+    "offers": "Brand exposure to 5,000 tech professionals in Jakarta through NusaTech Summit. Sponsor deliverables and attendee seniority to be confirmed.",
+    "budget_min": 50000, "budget_max": 100000, "region": "Indonesia",
+    "categories": ["Cloud", "AI", "Cybersecurity"], "audience": "5,000 tech professionals", "status": "open"
+  },
+  {
+    "opp_id": "B1", "company": "CloudKita",
+    "seeks": "Brand exposure among Indonesian tech decision-makers as a Singapore cloud provider entering Indonesia.",
+    "offers": "Cloud event sponsorship budget of USD 60,000–120,000 for access to Indonesian tech decision-makers.",
+    "budget_min": 60000, "budget_max": 120000, "region": "Indonesia",
+    "categories": ["Cloud"], "audience": "Indonesian tech decision-makers", "status": "open"
+  },
+  {
+    "opp_id": "B2", "company": "CloudKita",
+    "seeks": "An implementation partner for Indonesian enterprise customers, including AI software implementation on cloud infrastructure.",
+    "offers": "A partnership opportunity to implement solutions for Indonesian enterprise customers of a Singapore cloud provider entering Indonesia. Commercial terms to be discussed.",
+    "budget_min": null, "budget_max": null, "region": "Indonesia",
+    "categories": ["Cloud", "AI implementation"], "audience": "Indonesian enterprises", "status": "open"
+  },
+  {
+    "opp_id": "C1", "company": "SecureNusa",
+    "seeks": "CISO leads through cybersecurity events in Indonesia; need evidence of CISO attendance.",
+    "offers": "Cybersecurity event sponsorship budget of USD 40,000–70,000 from a Jakarta cybersecurity vendor.",
+    "budget_min": 40000, "budget_max": 70000, "region": "Indonesia",
+    "categories": ["Cybersecurity"], "audience": "CISOs", "status": "open"
+  },
+  {
+    "opp_id": "D1", "company": "PromptWorks",
+    "seeks": "Enterprise clients for AI implementation in Southeast Asia, including Indonesia. Small event participation budget of USD 5,000–10,000; this is not a price for implementation work.",
+    "offers": "AI software implementation capability from a Singapore agency serving enterprise clients in Indonesia and Southeast Asia.",
+    "budget_min": 5000, "budget_max": 10000, "region": "Indonesia",
+    "categories": ["AI implementation"], "audience": "Enterprise clients", "status": "open"
+  },
+  {
+    "opp_id": "E1", "company": "BatikMesin Supply",
+    "seeks": "Distributors for industrial packaging machines in Vietnam and Thailand.",
+    "offers": "Industrial packaging machines and distributor relationships from a Surabaya supplier. No tech-event sponsorship offer.",
+    "budget_min": null, "budget_max": null, "region": "Vietnam and Thailand",
+    "categories": ["Industrial packaging"], "audience": "Machine distributors", "status": "open"
+  }
+]

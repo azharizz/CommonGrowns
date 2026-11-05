@@ -1,0 +1,28 @@
+[Unit]
+Description=CommonGrown shared company-isolated worker
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/commongrown/switch.json
+ConditionPathExists=/var/lib/commongrown/switch-identity.json
+
+[Service]
+Type=simple
+User=commongrown
+Group=commongrown
+WorkingDirectory=/opt/commongrown
+EnvironmentFile=/etc/commongrown/worker.env
+Environment=HOME=/var/lib/commongrown
+ExecStart=/opt/commongrown/.venv/bin/python /opt/commongrown/switch_worker.py run --config /etc/commongrown/switch.json
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=78
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/commongrown
+
+[Install]
+WantedBy=multi-user.target

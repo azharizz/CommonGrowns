@@ -1,0 +1,14 @@
+{
+  "url": "http://127.0.0.1:8080",
+  "name": "commongrown",
+  "users": {
+    "REPLACE_WITH_RINA_SWITCH_USER_ID": "NusaConf",
+    "REPLACE_WITH_BUDI_SWITCH_USER_ID": "CloudKita"
+  },
+  "rooms": {
+    "REPLACE_WITH_A_PRIVATE_ROOM_ID": {"kind": "private", "company": "NusaConf"},
+    "REPLACE_WITH_B_PRIVATE_ROOM_ID": {"kind": "private", "company": "CloudKita"},
+    "REPLACE_WITH_EXCHANGE_ROOM_ID": {"kind": "exchange"},
+    "REPLACE_WITH_DEAL_ROOM_ID": {"kind": "deal", "opportunities": ["A1", "B1"]}
+  }
+}
