@@ -21,6 +21,17 @@ class SwitchTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 safe_url(value)
 
+    def test_mention_forms_from_other_bridges_are_stripped(self):
+        from types import SimpleNamespace
+        from commongrown.worker import Worker
+        bot = SimpleNamespace(config={"name": "commongrown2"})
+        for body in ("@commongrown2 /facts", "@CommonGrown2: /facts", "<@U0123> /facts", "<at>CommonGrown</at> /facts"):
+            self.assertEqual(Worker.mention(bot, body), "/facts")
+        self.assertEqual(Worker.mention(bot, "lunch at noon?"), "lunch at noon?")
+
+    def test_message_chunks_respect_a_smaller_limit(self):
+        self.assertTrue(all(len(part) <= 1900 for part in chunks({"reply": "a" * 8000}, 1900)))
+
     def test_message_chunks_stay_below_telegram_limit(self):
         parts = chunks({"reply": "a" * 8000})
         self.assertTrue(all(len(p) <= 3500 for p in parts))

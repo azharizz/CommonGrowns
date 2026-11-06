@@ -1,6 +1,7 @@
 {
   "url": "http://127.0.0.1:8080",
   "name": "commongrown",
+  "max_message_chars": 3500,
   "users": {
     "REPLACE_WITH_RINA_SWITCH_USER_ID": "NusaConf",
     "REPLACE_WITH_BUDI_SWITCH_USER_ID": "CloudKita"

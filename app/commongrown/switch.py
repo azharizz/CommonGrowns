@@ -58,9 +58,10 @@ def message_event(frame):
     return data if isinstance(data.get("payload"), dict) else None
 
 
-def chunks(result):
+def chunks(result, size=3500):
+    # size comes from max_message_chars: Telegram allows 4096, Discord only 2000.
     content = render(result)
-    return [content[start:start + 3500] for start in range(0, len(content), 3500)]
+    return [content[start:start + size] for start in range(0, len(content), size)]
 
 
 class ProtocolError(RuntimeError):
@@ -107,7 +108,7 @@ async def serve(worker, identity, checkpoint):
                         # Do not echo exception bodies: they may contain provider or private data.
                         result = {"reply": "Request failed. Check operator logs/configuration and retry. No failed brief was charged."} if spoken else None
                     if result is not None:
-                        for content in chunks(result):
+                        for content in chunks(result, worker.config.get("max_message_chars", 3500)):
                             # Retry forwarding independently; do not regenerate or charge again.
                             for attempt in range(4):
                                 try:

@@ -1,6 +1,7 @@
 """One stateless model worker; identity and room policy decide each request's data."""
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -157,8 +158,10 @@ class Worker:
                 or any(str(payload.get("sender", "")).lower().startswith("@" + n + ":") for n in names))
 
     def mention(self, message):
-        mention = "@" + self.config.get("name", "commongrown")
-        return message[len(mention):].strip() if message.startswith(mention + " ") else message
+        # Telegram sends "@name"; other Switch bridges may pass the platform's own form
+        # (Slack/Discord "<@id>", Teams "<at>name</at>"). Experimental: only Telegram has run live.
+        name = re.escape(self.config.get("name", "commongrown"))
+        return re.sub(rf"^(?:@{name}:?|<@[^>\s]+>|<at>[^<]*</at>)\s+", "", message, count=1, flags=re.I).strip()
 
     def onboard(self, room, sender, message):
         command, _, tail = message.partition(" ")

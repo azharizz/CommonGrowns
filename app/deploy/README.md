@@ -55,6 +55,19 @@ sudo systemctl enable --now commongrown
 
 Add the bot to a Telegram group, run `!invite-agent @commongrown2` once, then `@commongrown2 /setup <Company>`. History from before the bot joined is not visible to it.
 
+## Other chat apps (experimental)
+
+Not tested. Only Telegram has run live. Connect the app in Switch Console (Home, Messaging apps, Connect), following the [Switch guide](https://docs.switchagents.ai/switch-rooms/deploy/messaging-apps/), then invite the agent:
+
+| App | Make the room | Invite the agent |
+|---|---|---|
+| Slack | `/invite @Agent Switch` in the channel | `/invite-agent @commongrown2` |
+| Discord | Post any message in the channel | `/invite-agent @commongrown2` |
+| Microsoft Teams | Bind the channel in Switch Console | `/invite-agent @commongrown2` (mention the bot unless channel capture is on) |
+| Mattermost | Add the agent's bot account to the channel | `!invite-agent @commongrown2` |
+
+Then run `@commongrown2 /setup <Company>` as usual. Always mention the agent before a command: a bare `/facts` is taken by Slack as its own slash command. On Discord set `"max_message_chars": 1900` in `switch.json`. Listening to the whole group on Teams needs Graph channel messages; without them the agent answers only when tagged.
+
 ## Reset the demo
 
 With the worker stopped (`sudo systemctl stop commongrown`):

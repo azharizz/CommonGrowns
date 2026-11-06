@@ -72,7 +72,11 @@ Data lives in `.data` (override with `COMMONGROWN_DATA`).
 uv run python -m unittest discover -s tests
 ```
 
-67 tests cover consent, ownership, the facts store and its privacy rules, the proactive flow, open demo groups and the rate cap, credits (retries, concurrency, refunds), Switch message parsing and the render layer. Chroma, the model and Switch are mocked; live behavior was verified by running real group conversations on the deployed worker.
+69 tests cover consent, ownership, the facts store and its privacy rules, the proactive flow, open demo groups and the rate cap, credits (retries, concurrency, refunds), Switch message parsing and the render layer. Chroma, the model and Switch are mocked; live behavior was verified by running real group conversations on the deployed worker.
+
+## Other chat apps (experimental, not tested)
+
+Telegram is the only app run live. The worker talks only to Switch rooms, so Slack, Teams, Discord and Mattermost need no new connector, just a Switch bridge. Two settings exist for them: mentions in the platform's own form are stripped (`<@id>`, `<at>name</at>`), and `max_message_chars` in the worker config sets the reply size (Discord needs 1900). See `deploy/README.md`.
 
 ## Known limits
 
